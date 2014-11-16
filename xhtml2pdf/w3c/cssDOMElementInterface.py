@@ -13,7 +13,7 @@
 #~ Imports
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-import css
+from . import css
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~ Definitions
@@ -68,8 +68,8 @@ class CSSDOMElementInterface(css.CSSElementInterfaceAbstract):
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def matchesNode(self, namespace_tagName):
-        namespace,tagName = namespace_tagName
+    def matchesNode(self, xxx_todo_changeme):
+        (namespace, tagName) = xxx_todo_changeme
         if tagName not in ('*', self.domElement.tagName):
             return False
         if namespace in (None, '', '*'):

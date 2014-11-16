@@ -55,7 +55,7 @@ def pisaGetAttributes(c, tag, attributes):
 
     attrs = {}
     if attributes:
-        for k, v in attributes.items():
+        for k, v in list(attributes.items()):
             try:
                 attrs[str(k)] = str(v)  # XXX no Unicode! Reportlab fails with template names
             except:
@@ -66,11 +66,11 @@ def pisaGetAttributes(c, tag, attributes):
         block, adef = TAGS[tag]
         adef["id"] = STRING
         # print block, adef
-        for k, v in adef.iteritems():
+        for k, v in adef.items():
             nattrs[k] = None
             # print k, v
             # defaults, wenn vorhanden
-            if type(v) == types.TupleType:
+            if type(v) == tuple:
                 if v[1] == MUST:
                     if k not in attrs:
                         log.warn(c.warning("Attribute '%s' must be set!", k))
@@ -82,9 +82,8 @@ def pisaGetAttributes(c, tag, attributes):
             else:
                 nv = attrs.get(k, None)
                 dfl = None
-
             if nv is not None:
-                if type(v) == types.ListType:
+                if type(v) == list:
                     nv = nv.strip().lower()
                     if nv not in v:
                         #~ raise PML_EXCEPTION, "attribute '%s' of wrong value, allowed is one of: %s" % (k, repr(v))
@@ -120,7 +119,6 @@ def pisaGetAttributes(c, tag, attributes):
                     nv = c.getFontName(nv)
 
                 nattrs[k] = nv
-
     return AttrContainer(nattrs)
 
 
@@ -225,7 +223,7 @@ def mapNonStandardAttrs(c, n, attrList):
 
 def getCSSAttrCacheKey(node):
     _cl = _id = _st = ''
-    for k, v in node.attributes.items():
+    for k, v in list(node.attributes.items()):
         if k == 'class':
             _cl = v
         elif k == 'id':
@@ -393,7 +391,7 @@ def pisaPreLoop(node, context, collect=False):
     Collect all CSS definitions
     """
 
-    data = u""
+    data = ""
     if node.nodeType == Node.TEXT_NODE and collect:
         data = node.data
 
@@ -411,7 +409,7 @@ def pisaPreLoop(node, context, collect=False):
                     for node in node.childNodes:
                         data += pisaPreLoop(node, context, collect=True)
                     context.addCSS(data)
-                    return u""
+                    return ""
 
                 if name == "link" and attr.href and attr.rel.lower() == "stylesheet":
                     # print "CSS LINK", attr
@@ -557,6 +555,7 @@ def pisaLoop(node, context, path=None, **kw):
 
         # BEGIN tag
         klass = globals().get("pisaTag%s" % node.tagName.replace(":", "").upper(), None)
+
         obj = None
 
         # Static block
@@ -576,7 +575,6 @@ def pisaLoop(node, context, path=None, **kw):
         for nnode in node.childNodes:
             pisaLoop(nnode, context, path, **kw)
         context.fragBlock = fragBlock
-
         # END tag
         if obj:
             obj.end(context)
@@ -647,13 +645,12 @@ def pisaParser(src, context, default_css="", xhtml=False, encoding=None, xml_out
     else:
         parser = html5lib.HTMLParser(tree=treebuilders.getTreeBuilder("dom"))
 
-    if type(src) in types.StringTypes:
-        if type(src) is types.UnicodeType:
-            # If an encoding was provided, do not change it.
-            if not encoding:
-                encoding = "utf-8"
-            src = src.encode(encoding)
-        src = pisaTempFile(src, capacity=context.capacity)
+    if type(src) is str:
+        # If an encoding was provided, do not change it.
+        if not encoding:
+            encoding = "utf-8"
+        src = src.encode(encoding)
+    src = pisaTempFile(src, capacity=context.capacity)
 
     # Test for the restrictions of html5lib
     if encoding:

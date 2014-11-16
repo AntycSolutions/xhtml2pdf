@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-from reportlab.lib.colors import Color, toColor
+from reportlab.lib.colors import Color, CMYKColor, getAllNamedColors, toColor, \
+    HexColor
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib.units import inch, cm
 import base64
-try:
-    import httplib
-except ImportError:
-    import http.client as httplib
+import http.client
 import logging
 import mimetypes
 import os.path
@@ -17,15 +15,9 @@ import string
 import sys
 import tempfile
 import types
-import urllib
-try:
-    import urllib2
-except ImportError:
-    import urllib.request as urllib2
-try:
-    import urlparse
-except ImportError:
-    import urllib.parse as urlparse
+import urllib.request, urllib.parse, urllib.error
+import urllib.request, urllib.error, urllib.parse
+import urllib.parse
 
 # Copyright 2010 Dirk Holtwick, holtwick.it
 #
@@ -44,7 +36,7 @@ except ImportError:
 rgb_re = re.compile("^.*?rgb[(]([0-9]+).*?([0-9]+).*?([0-9]+)[)].*?[ ]*$")
 
 _reportlab_version = tuple(map(int, reportlab.Version.split('.')))
-if _reportlab_version < (2, 1):
+if _reportlab_version < (2,1):
     raise ImportError("Reportlab Version 2.1+ is needed!")
 
 REPORTLAB22 = _reportlab_version >= (2, 2)
@@ -52,13 +44,8 @@ REPORTLAB22 = _reportlab_version >= (2, 2)
 
 log = logging.getLogger("xhtml2pdf")
 
-try:
-    import cStringIO as io
-except:
-    try:
-        import StringIO as io
-    except ImportError:
-        import io
+
+import io
 
 try:
     import PyPDF2
@@ -76,16 +63,15 @@ except:
     renderSVG = None
 
 
-#=========================================================================
+#===============================================================================
 # Memoize decorator
-#=========================================================================
+#===============================================================================
 class memoized(object):
-
     """
     A kwargs-aware memoizer, better than the one in python :)
 
-    Don't pass in too large kwargs, since this turns them into a tuple of
-    tuples. Also, avoid mutable types (as usual for memoizers)
+    Don't pass in too large kwargs, since this turns them into a tuple of tuples
+    Also, avoid mutable types (as usual for memoizers)
 
     What this does is to create a dictionnary of {(*parameters):return value},
     and uses it as a cache for subsequent calls to the same method.
@@ -93,16 +79,18 @@ class memoized(object):
     and that are called often. It's a perfect match for our getSize etc...
     """
 
+
     def __init__(self, func):
         self.cache = {}
         self.func = func
-        self.__doc__ = self.func.__doc__  # To avoid great confusion
-        self.__name__ = self.func.__name__  # This also avoids great confusion
+        self.__doc__ = self.func.__doc__ # To avoid great confusion
+        self.__name__ = self.func.__name__ # This also avoids great confusion
+
 
     def __call__(self, *args, **kwargs):
         # Make sure the following line is not actually slower than what you're
         # trying to memoize
-        args_plus = tuple(kwargs.iteritems())
+        args_plus = tuple(kwargs.items())
         key = (args, args_plus)
         try:
             if key not in self.cache:
@@ -118,20 +106,19 @@ def ErrorMsg():
     """
     Helper to get a nice traceback as string
     """
-    import traceback
-    import sys
+    import traceback, sys
+
 
     type = value = tb = limit = None
     type, value, tb = sys.exc_info()
-    list = traceback.format_tb(tb, limit) + \
-        traceback.format_exception_only(type, value)
+    list = traceback.format_tb(tb, limit) + traceback.format_exception_only(type, value)
     return "Traceback (innermost last):\n" + "%-20s %s" % (
         string.join(list[: - 1], ""),
         list[- 1])
 
 
 def toList(value):
-    if type(value) not in (types.ListType, types.TupleType):
+    if type(value) not in (list, tuple):
         return [value]
     return list(value)
 
@@ -151,8 +138,7 @@ def getColor(value, default=None):
     if value in COLOR_BY_NAME:
         return COLOR_BY_NAME[value]
     if value.startswith("#") and len(value) == 4:
-        value = "#" + value[1] + value[1] + \
-            value[2] + value[2] + value[3] + value[3]
+        value = "#" + value[1] + value[1] + value[2] + value[2] + value[3] + value[3]
     elif rgb_re.search(value):
         # e.g., value = "<css function: rgb(153, 51, 153)>", go figure:
         r, g, b = [int(x) for x in rgb_re.search(value).groups()]
@@ -161,7 +147,7 @@ def getColor(value, default=None):
         # Shrug
         pass
 
-    return toColor(value, default)  # Calling the reportlab function
+    return toColor(value, default) # Calling the reportlab function
 
 
 def getBorderStyle(value, default=None):
@@ -223,11 +209,11 @@ def getSize(value, relative=0, base=None, default=0.0):
         original = value
         if value is None:
             return relative
-        elif type(value) is types.FloatType:
+        elif type(value) is float:
             return value
         elif isinstance(value, int):
             return float(value)
-        elif type(value) in (types.TupleType, types.ListType):
+        elif type(value) in (tuple, list):
             value = "".join(value)
         value = str(value).strip().lower().replace(",", ".")
         if value[-2:] == 'cm':
@@ -241,25 +227,21 @@ def getSize(value, relative=0, base=None, default=0.0):
         elif value[-2:] == 'pt':
             return float(value[:-2].strip())
         elif value[-2:] == 'pc':
-            return float(value[:-2].strip()) * 12.0  # 1pc == 12pt
+            return float(value[:-2].strip()) * 12.0 # 1pc == 12pt
         elif value[-2:] == 'px':
-            # XXX W3C says, use 96pdi
-            # http://www.w3.org/TR/CSS21/syndata.html#length-units
-            return float(value[:-2].strip()) * dpi96
+            return float(value[
+                         :-2].strip()) * dpi96  # XXX W3C says, use 96pdi http://www.w3.org/TR/CSS21/syndata.html#length-units
         elif value[-1:] == 'i':  # 1pt == 1/72inch
             return float(value[:-1].strip()) * inch
         elif value in ("none", "0", "auto"):
             return 0.0
         elif relative:
             if value[-2:] == 'em':  # XXX
-                # 1em = 1 * fontSize
-                return float(value[:-2].strip()) * relative
-            elif value[-2:] == 'ex':  # XXX
-                # 1ex = 1/2 fontSize
-                return float(value[:-2].strip()) * (relative / 2.0)
+                return float(value[:-2].strip()) * relative  # 1em = 1 * fontSize
+            elif value[-2:] == 'ex': # XXX
+                return float(value[:-2].strip()) * (relative / 2.0) # 1ex = 1/2 fontSize
             elif value[-1:] == '%':
-                # 1% = (fontSize * 1) / 100
-                return (relative * float(value[:-1].strip())) / 100.0
+                return (relative * float(value[:-1].strip())) / 100.0 # 1% = (fontSize * 1) / 100
             elif value in ("normal", "inherit"):
                 return relative
             elif value in _relativeSizeTable:
@@ -296,7 +278,7 @@ def getCoords(x, y, w, h, pagesize):
         x = ax + x
     if y < 0:
         y = ay + y
-    if w is not None and h is not None:
+    if w != None and h != None:
         if w <= 0:
             w = (ax - x + w)
         if h <= 0:
@@ -401,16 +383,19 @@ GAE = "google.appengine" in sys.modules
 
 if GAE:
     STRATEGIES = (
-        io.StringIO,
-        io.StringIO)
+        # io.StringIO,
+        # io.StringIO
+        io.BytesIO,
+        io.BytesIO
+        )
 else:
     STRATEGIES = (
-        io.StringIO,
+        # io.StringIO,
+        io.BytesIO,
         tempfile.NamedTemporaryFile)
 
 
 class pisaTempFile(object):
-
     """
     A temporary file implementation that uses memory unless
     either capacity is breached or fileno is requested, at which
@@ -435,7 +420,10 @@ class pisaTempFile(object):
         """
 
         self.capacity = capacity
-        self.strategy = int(len(buffer) > self.capacity)
+        if isinstance(buffer, io.BytesIO):
+            self.strategy = int(len(buffer.getvalue()) > self.capacity)
+        else:
+            self.strategy = int(len(buffer) > self.capacity)
         try:
             self._delegate = self.STRATEGIES[self.strategy]()
         except:
@@ -447,8 +435,7 @@ class pisaTempFile(object):
 
     def makeTempFile(self):
         """
-        Switch to next startegy. If an error occured,
-        stay with the first strategy
+        Switch to next startegy. If an error occured stay with the first strategy
         """
 
         if self.strategy == 0:
@@ -494,7 +481,10 @@ class pisaTempFile(object):
         """
 
         if self.capacity > 0 and self.strategy == 0:
-            len_value = len(value)
+            if isinstance(value, io.BytesIO):
+                len_value = len(value.getvalue())
+            else:
+                len_value = len(value)
             if len_value >= self.capacity:
                 needs_new_strategy = True
             else:
@@ -503,7 +493,11 @@ class pisaTempFile(object):
                     (self.tell() + len_value) >= self.capacity
             if needs_new_strategy:
                 self.makeTempFile()
-        self._delegate.write(value)
+        if value:
+            if isinstance(value, io.BytesIO):
+                self._delegate.write(value.getvalue())
+            else:
+                self._delegate.write(value)
 
     def __getattr__(self, name):
         try:
@@ -515,12 +509,10 @@ class pisaTempFile(object):
             raise AttributeError(e)
 
 
-_rx_datauri = re.compile(
-    "^data:(?P<mime>[a-z]+/[a-z]+);base64,(?P<data>.*)$", re.M | re.DOTALL)
+_rx_datauri = re.compile("^data:(?P<mime>[a-z]+/[a-z]+);base64,(?P<data>.*)$", re.M | re.DOTALL)
 
 
 class pisaFileObject:
-
     """
     XXX
     """
@@ -533,89 +525,77 @@ class pisaFileObject:
         self.uri = None
         self.local = None
         self.tmp_file = None
-        uri = uri or str()
         uri = uri.encode('utf-8')
         log.debug("FileObject %r, Basepath: %r", uri, basepath)
 
         # Data URI
-        if uri.startswith("data:"):
+        if uri.startswith(b"data:"):
             m = _rx_datauri.match(uri)
             self.mimetype = m.group("mime")
             self.data = base64.decodestring(m.group("data"))
 
         else:
             # Check if we have an external scheme
-            if basepath and not urlparse.urlparse(uri).scheme:
-                urlParts = urlparse.urlparse(basepath)
+            if basepath and not urllib.parse.urlparse(uri).scheme:
+                urlParts = urllib.parse.urlparse(basepath)
             else:
-                urlParts = urlparse.urlparse(uri)
+                urlParts = urllib.parse.urlparse(uri)
 
             log.debug("URLParts: %r", urlParts)
 
             if urlParts.scheme == 'file':
                 if basepath and uri.startswith('/'):
-                    uri = urlparse.urljoin(basepath, uri[1:])
-                urlResponse = urllib2.urlopen(uri)
-                self.mimetype = urlResponse.info().get(
-                    "Content-Type", '').split(";")[0]
+                    uri = urllib.parse.urljoin(basepath, uri[1:])
+                urlResponse = urllib.request.urlopen(uri)
+                self.mimetype = urlResponse.info().get("Content-Type", '').split(";")[0]
                 self.uri = urlResponse.geturl()
                 self.file = urlResponse
-
-            # Drive letters have len==1 but we are looking
-            # for things like http:
+            # Drive letters have len==1 but we are looking for things like http:
             elif urlParts.scheme in ('http', 'https'):
-
                 # External data
                 if basepath:
-                    uri = urlparse.urljoin(basepath, uri)
+                    uri = urllib.parse.urljoin(basepath, uri)
 
                 #path = urlparse.urlsplit(url)[2]
                 #mimetype = getMimeType(path)
 
                 # Using HTTPLIB
-                server, path = urllib.splithost(uri[uri.find("//"):])
+                server, path = urllib.parse.splithost(uri[uri.find("//"):])
                 if uri.startswith("https://"):
-                    conn = httplib.HTTPSConnection(server)
+                    conn = http.client.HTTPSConnection(server)
                 else:
-                    conn = httplib.HTTPConnection(server)
+                    conn = http.client.HTTPConnection(server)
                 conn.request("GET", path)
                 r1 = conn.getresponse()
                 # log.debug("HTTP %r %r %r %r", server, path, uri, r1)
                 if (r1.status, r1.reason) == (200, "OK"):
-                    self.mimetype = r1.getheader(
-                        "Content-Type", '').split(";")[0]
+                    self.mimetype = r1.getheader("Content-Type", '').split(";")[0]
                     self.uri = uri
                     if r1.getheader("content-encoding") == "gzip":
                         import gzip
                         try:
-                            import cStringIO as io
+                            import io as StringIO
                         except:
-                            try:
-                                import StringIO as io
-                            except ImportError:
-                                import io
+                            import io
 
-                        self.file = gzip.GzipFile(
-                            mode="rb", fileobj=io.StringIO(r1.read()))
+                        self.file = gzip.GzipFile(mode="rb", fileobj=io.StringIO(r1.read()))
                     else:
                         self.file = r1
                 else:
                     try:
-                        urlResponse = urllib2.urlopen(uri)
-                    except urllib2.HTTPError:
+                        urlResponse = urllib.request.urlopen(uri)
+                    except urllib.error.HTTPError:
                         return
-                    self.mimetype = urlResponse.info().get(
-                        "Content-Type", '').split(";")[0]
+                    self.mimetype = urlResponse.info().get("Content-Type", '').split(";")[0]
                     self.uri = urlResponse.geturl()
                     self.file = urlResponse
 
             else:
-
                 # Local data
                 if basepath:
                     uri = os.path.normpath(os.path.join(basepath, uri))
 
-                if os.path.isfile(uri):
+                if os.path.isfile(uri.decode()):
                     self.uri = uri
                     self.local = uri
                     self.setMimeTypeByName(uri)
@@ -655,9 +635,9 @@ class pisaFileObject:
 
     def setMimeTypeByName(self, name):
         " Guess the mime type "
-        mimetype = mimetypes.guess_type(name)[0]
+        mimetype = mimetypes.guess_type(name.decode())[0]
         if mimetype is not None:
-            self.mimetype = mimetypes.guess_type(name)[0].split(";")[0]
+            self.mimetype = mimetypes.guess_type(name.decode())[0].split(";")[0]
 
 
 def getFile(*a, **kw):
@@ -844,3 +824,4 @@ COLOR_BY_NAME = {
     'yellow': Color(1, 1, 0),
     'yellowgreen': Color(.603922, .803922, .196078)
 }
+
