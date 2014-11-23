@@ -1294,7 +1294,10 @@ class Paragraph(Flowable):
                         g.text = nText
                     else:
                         if nText != '' and nText[0] != ' ':
-                            g.text += ' '.encode(self.encoding) + nText
+                            if isinstance(g.text, str):
+                                g.text += ' ' + nText.decode(self.encoding)
+                            else:
+                                g.text += ' '.encode(self.encoding) + nText
 
                     for i in w[2:]:
                         g = i[0].clone()
