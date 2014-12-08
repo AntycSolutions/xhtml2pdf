@@ -1287,8 +1287,13 @@ class Paragraph(Flowable):
                                         wi.text += ' '
                                     break
                             else:
-                                if not g.text.endswith(' '):
-                                    g.text += ' '
+                                if isinstance(g.text, str):
+                                    if not g.text.endswith(' '):
+                                        g.text += ' '
+                                else:
+                                    space = ' '.encode('utf-8')
+                                    if not g.text.endswith(space):
+                                        g.text += space
                         g = f.clone()
                         words.append(g)
                         g.text = nText
