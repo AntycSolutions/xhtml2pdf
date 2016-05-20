@@ -866,8 +866,8 @@ class pisaContext(object):
             fontAlias = [str(x) for x in fontAlias]
 
             fontName = fontAlias[0]
-            parts = src.split(".")
-            baseName, suffix = ".".join(parts[: - 1]), parts[- 1]
+            parts = src.split(bytes(".", 'utf-8'))
+            baseName, suffix = bytes(".", 'utf-8').join(parts[: - 1]), parts[- 1]
             suffix = suffix.lower()
 
             if suffix in ["ttc", "ttf"]:
